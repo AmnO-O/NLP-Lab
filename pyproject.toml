@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oprb-lab"
+version = "0.1.0"
+description = "Pretrained OCR and VLM evaluation on occluded OPRB pages"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=10", "huggingface-hub>=0.30", "rapidfuzz>=3", "pandas>=2", "matplotlib>=3.8", "tqdm>=4.66"]
+
+[project.optional-dependencies]
+vlm = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.57.1,<5", "accelerate>=1", "docling-core>=2.48", "einops", "timm>=1", "sentencepiece"]
+paddle = ["paddleocr>=3.2,<4"]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

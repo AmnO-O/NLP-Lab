@@ -1,0 +1,2 @@
+# Install the CUDA PaddlePaddle wheel separately for your Kaggle CUDA environment.
+paddleocr==3.2.0

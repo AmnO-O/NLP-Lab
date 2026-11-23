@@ -1,0 +1,7 @@
+# Kaggle provides CUDA-enabled torch/torchvision. Keep its matching pair.
+transformers==4.57.1
+accelerate>=1,<2
+docling-core>=2.48,<3
+einops
+timm>=1,<2
+sentencepiece

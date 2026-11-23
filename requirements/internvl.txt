@@ -1,0 +1,6 @@
+# Legacy remote-code checkpoint: use a separate Kaggle session from Qwen3.
+transformers==4.48.3
+accelerate>=1,<2
+einops
+timm>=1,<2
+sentencepiece
