@@ -21,7 +21,7 @@ def build(root, model="qwen", portable=False):
          "Enable **Internet** and **GPU T4 ×2** in notebook settings. This notebook includes the source code. "
          "Start with 5 pages per category; use `LIMIT = None` for the full test. "
          "Use a fresh session when switching to/from InternVL. Download results before ending the session.")
-    cell("code", 'from pathlib import Path\nimport json, subprocess, sys\n'
+    cell("code", 'from pathlib import Path\nimport json, os, subprocess, sys\n'
          f'FILES = {payload!r}\n' +
          ('BASE = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path("/content") if Path("/content").exists() else Path.cwd()\n' if portable else 'BASE = Path("/kaggle/working")\n') +
          'ROOT = BASE / "oprb-lab"\n'
@@ -33,8 +33,10 @@ def build(root, model="qwen", portable=False):
          'LIMIT = 5\nDATA = BASE / "oprb-data"\n'
          'OUTPUT = BASE / "oprb-results"\n' +
          ('GPUS = "0"  # Change to "0,1" on Kaggle T4 x2\n' if portable else 'GPUS = "0,1"\n') +
+         'ENV = dict(os.environ)\n'
+         'ENV.pop("LD_LIBRARY_PATH", None)\n'
          'def run(*args):\n'
-         '    subprocess.run([sys.executable, *map(str, args)], cwd=ROOT, check=True)\n')
+         '    subprocess.run([sys.executable, *map(str, args)], cwd=ROOT, env=ENV, check=True)\n')
     cell("code", 'assert MODEL in ("paddle", "granite", "got", "internvl", "qwen")\n'
          'run("-m", "pip", "install", "-e", ".[test]")\n'
          'requirement = "paddle" if MODEL == "paddle" else "internvl" if MODEL == "internvl" else "vlm"\n'

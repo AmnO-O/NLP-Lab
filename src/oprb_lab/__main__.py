@@ -44,6 +44,7 @@ def launch(args):
         for rank, gpu in enumerate(gpus):
             env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="2",
                        PYTHONHASHSEED=str(args.seed), CUBLAS_WORKSPACE_CONFIG=":4096:8")
+            env.pop("LD_LIBRARY_PATH", None)
             log = (root / f"rank{rank}.log").open("a", encoding="utf-8")
             logs.append(log)
             workers.append(subprocess.Popen([sys.executable, "-u", "-m", "oprb_lab.worker", str(root), str(rank), str(len(gpus))],
