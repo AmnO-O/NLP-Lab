@@ -1,5 +1,6 @@
 """Download only occluded test images and scoring annotations."""
 import random
+import hashlib
 import shutil
 import tarfile
 from pathlib import Path
@@ -23,20 +24,29 @@ def extract_flat(archive, destination, suffix):
                 shutil.copyfileobj(source, target)
 
 
-def download(root):
-    from huggingface_hub import hf_hub_download
+def download(root, revision="main"):
+    from huggingface_hub import hf_hub_download, dataset_info
+    revision = dataset_info("kpurkayastha/OPRB", revision=revision).sha
     for category in EXPECTED:
         for kind, suffix in (("img", ".jpg"), ("gt", ".txt")):
             destination = Path(root) / category / kind
             marker = destination / ".complete"
-            if marker.exists() and len(list(destination.glob(f"*{suffix}"))) == EXPECTED[category]:
+            if marker.exists() and marker.read_text() == revision and len(list(destination.glob(f"*{suffix}"))) == EXPECTED[category]:
                 continue
-            archive = hf_hub_download("kpurkayastha/OPRB", f"test/{category}/{kind}.tar.gz", repo_type="dataset")
+            archive = hf_hub_download("kpurkayastha/OPRB", f"test/{category}/{kind}.tar.gz", repo_type="dataset", revision=revision)
             extract_flat(archive, destination, suffix)
             count = len(list(destination.glob(f"*{suffix}")))
             if count != EXPECTED[category]:
                 raise ValueError(f"{category}/{kind}: expected {EXPECTED[category]}, got {count}")
-            marker.touch()
+            marker.write_text(revision)
+
+
+def file_sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def collect(root, limit=None, seed=42):
@@ -48,13 +58,16 @@ def collect(root, limit=None, seed=42):
         labels = {p.stem: p for p in (Path(root) / category / "gt").glob("*.txt")}
         if not images or images.keys() != labels.keys():
             raise ValueError(f"Missing or unmatched images/GT in {category}")
+        if limit is None and len(images) != EXPECTED[category]:
+            raise ValueError(f"Full test requires {EXPECTED[category]} pairs in {category}; got {len(images)}")
         keys = sorted(images)
         if limit is not None:
             keys = sorted(random.Random(seed).sample(keys, min(limit, len(keys))))
         for key in keys:
             parts = key.split("__", 2)
             samples.append(dict(uid=f"{category}/{key}", sample_id=key, category=category,
-                                image_path=str(images[key]), gt_path=str(labels[key]),
+                                image_path=str(images[key].resolve()), gt_path=str(labels[key].resolve()),
+                                image_sha=file_sha(images[key]), gt_sha=file_sha(labels[key]),
                                 occlusion_type=parts[0], density=parts[1] if len(parts) > 1 else "unknown"))
     return samples
 

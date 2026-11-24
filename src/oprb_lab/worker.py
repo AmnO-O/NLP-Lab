@@ -3,13 +3,15 @@ import argparse
 import json
 import os
 import time
+import random
+import platform
 from importlib.metadata import version
 from pathlib import Path
 
 from .data import read_gt, shard
 from .metrics import score
 from .models import Adapter
-from .storage import read_rows, rewrite_rows
+from .storage import resume_rows
 
 
 def run(run_dir, rank, world_size):
@@ -17,13 +19,21 @@ def run(run_dir, rank, world_size):
     import torch
     root = Path(run_dir)
     config = json.loads((root / "config.json").read_text())
+    random.seed(config["seed"])
+    import numpy as np
+    np.random.seed(config["seed"])
+    torch.manual_seed(config["seed"])
+    torch.cuda.manual_seed_all(config["seed"])
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    if config["model"] == "paddle":
+        import paddle
+        paddle.seed(config["seed"])
     samples = json.loads((root / "manifest.json").read_text())
     selected = shard(samples, rank, world_size)
     path = root / f"rank{rank}.jsonl"
-    old = read_rows(path)
-    completed = {r["uid"]: r for r in old if r["status"] == "ok"}
-    rewrite_rows(path, list(completed.values()))
-    todo = [s for s in selected if s["uid"] not in completed]
+    todo = resume_rows(path, selected)
     if not todo:
         return
     model = Adapter(config["model"], config["revision"], config["max_tokens"],
@@ -39,7 +49,9 @@ def run(run_dir, rank, world_size):
     synchronize()
     metadata = dict(rank=rank, physical_gpu=os.environ.get("CUDA_VISIBLE_DEVICES"),
                     gpu=torch.cuda.get_device_name(0), parameter_count=model.parameter_count,
-                    torch=version("torch"))
+                    torch=version("torch"), python=platform.python_version(), platform=platform.platform(),
+                    cuda=torch.version.cuda, cudnn=torch.backends.cudnn.version(),
+                    reproducibility="Seeded; deterministic algorithms warn on unsupported operations; not a bitwise guarantee")
     if config["model"] != "paddle":
         metadata["transformers"] = version("transformers")
     else:

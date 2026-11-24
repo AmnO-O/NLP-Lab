@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import time
+from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 
 from .data import collect, download
@@ -19,10 +20,17 @@ def launch(args):
     if any(not g.isdigit() for g in gpus) or len(set(gpus)) != len(gpus):
         raise ValueError("gpus must be unique numeric IDs, e.g. 0,1")
     revision = model_info(MODELS[args.model], revision=args.revision).sha if args.model != "paddle" else "paddleocr-package-assets"
-    config = dict(schema=1, model=args.model, model_id=MODELS[args.model], revision=revision,
+    packages = {}
+    for name in ("torch", "torchvision", "transformers", "paddleocr", "paddlepaddle-gpu", "docling-core", "Pillow", "rapidfuzz"):
+        try:
+            packages[name] = version(name)
+        except PackageNotFoundError:
+            pass
+    config = dict(schema=2, model=args.model, model_id=MODELS[args.model], revision=revision, packages=packages,
                   precision="float16" if args.model != "paddle" else "PaddleOCR default float32",
                   max_tokens=args.max_tokens, max_pixels=args.max_pixels, max_tiles=args.max_tiles,
-                  prompt=PROMPT, limit=args.limit, seed=args.seed, world_size=len(gpus),
+                  prompt="Convert this page to docling." if args.model == "granite" else "GOT processor unformatted OCR" if args.model == "got" else PROMPT,
+                  limit=args.limit, seed=args.seed, world_size=len(gpus),
                   manifest_sha=fingerprint([{k: v for k, v in s.items() if k not in ("image_path", "gt_path")} for s in samples]),
                   normalization="NFKC whitespace casefold", gt_order="annotation order",
                   code_sha=fingerprint({p.name: p.read_text(encoding="utf-8") for p in Path(__file__).parent.glob("*.py")}))
@@ -34,7 +42,8 @@ def launch(args):
     start = time.perf_counter()
     try:
         for rank, gpu in enumerate(gpus):
-            env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="2")
+            env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="2",
+                       PYTHONHASHSEED=str(args.seed), CUBLAS_WORKSPACE_CONFIG=":4096:8")
             log = (root / f"rank{rank}.log").open("a", encoding="utf-8")
             logs.append(log)
             workers.append(subprocess.Popen([sys.executable, "-u", "-m", "oprb_lab.worker", str(root), str(rank), str(len(gpus))],
@@ -65,6 +74,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     fetch = sub.add_parser("download")
     fetch.add_argument("--data", default="data/oprb")
+    fetch.add_argument("--revision", default="main", help="Dataset revision; resolved to a commit before downloading")
     report = sub.add_parser("summarize")
     report.add_argument("run_dir")
     run = sub.add_parser("run")
@@ -80,7 +90,7 @@ def main():
     run.add_argument("--max-tiles", type=int, default=12)
     args = parser.parse_args()
     if args.command == "download":
-        download(args.data)
+        download(args.data, args.revision)
     elif args.command == "summarize":
         summarize(args.run_dir)
     else:

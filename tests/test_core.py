@@ -50,6 +50,14 @@ def test_dataset_pairs_gt_and_seed(tmp_path):
     assert len({s["uid"] for s in samples}) == 4
     assert samples[0]["density"] == "2p0pct"
     assert read_gt(samples[0]["gt_path"]) == "word"
+    original = samples[0]
+    from pathlib import Path
+    Path(original["gt_path"]).write_text("changed\t" + "\t".join(["0"] * 10))
+    updated = next(s for s in collect(tmp_path, 2, 42) if s["uid"] == original["uid"])
+    assert updated["gt_sha"] != original["gt_sha"]
+    assert updated["image_sha"] == original["image_sha"]
+    with pytest.raises(ValueError, match="Full test requires"):
+        collect(tmp_path)
     (tmp_path / "text" / "gt" / "extra.txt").write_text("")
     with pytest.raises(ValueError):
         collect(tmp_path)
