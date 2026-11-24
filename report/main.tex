@@ -1,0 +1,163 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage[utf8]{vietnam}
+\usepackage{geometry}
+\usepackage{tcolorbox}
+\usepackage{graphicx}
+\usepackage{lipsum}
+\usepackage{pifont}
+\usepackage{ragged2e}
+\usepackage{setspace}
+\usepackage{tocloft}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\usepackage{fancyhdr}
+\setlength{\headheight}{32pt}
+\addtolength{\topmargin}{-16pt}
+\usepackage{caption}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{placeins}
+\usepackage[colorlinks=true, urlcolor=blue, hidelinks]{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
+\usepackage{booktabs,tabularx,array,tikz,graphicx}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\ifnum\value{page}>2 \vspace*{0.4cm} \textit{Intro to AI -- Wrongway Quoridor Agent}\hspace{-2.3cm} \fi}
+\fancyhead[L]{\ifnum\value{page}>2 \raisebox{-1ex}{\makebox[\textwidth]{\hrulefill}} \fi}
+\fancyfoot[C]{\ifnum\value{page}>2 \thepage \fi}
+
+\renewcommand{\headrulewidth}{0pt}
+
+\geometry{left=2.5cm,right=2cm,top=2.2cm,bottom=2.2cm}
+\sloppy
+\newtcbox{\inlinecode}{on line,
+	boxsep=1pt, left=1pt, right=1pt, top=1pt, bottom=1pt,
+	colframe=gray!80, colback=gray!20,  
+	boxrule=0.5pt, arc=3pt,
+	nobeforeafter}
+\lstset{
+	language=Python,                      
+	basicstyle=\ttfamily\footnotesize,
+	keywordstyle=\color{blue!80!black},
+	commentstyle=\color{gray!90!black}, 
+	stringstyle=\color{red!70!black},          
+	numbers=left,  
+	numberstyle=\tiny\color{black!60},
+	backgroundcolor=\color{black!3},
+	frame=single,
+	tabsize=4,
+	breaklines=true,
+	captionpos=b,
+	columns=fixed, 
+	basewidth=0.5em,
+}
+
+\begin{document}
+	
+\begin{titlepage}
+    \thispagestyle{empty}
+    % Double-line decorative border (HCMUS thesis & project standard)
+    \begin{tikzpicture}[remember picture, overlay]
+        \draw[line width=1.8pt, black] 
+            ([xshift=22mm, yshift=-18mm]current page.north west) 
+            rectangle 
+            ([xshift=-16mm, yshift=18mm]current page.south east);
+        \draw[line width=0.6pt, black] 
+            ([xshift=24mm, yshift=-20mm]current page.north west) 
+            rectangle 
+            ([xshift=-18mm, yshift=20mm]current page.south east);
+        % Subtle decorative corner lines
+        \draw[line width=0.4pt, black] 
+            ([xshift=25mm, yshift=-21mm]current page.north west) -- ++(10mm, 0);
+        \draw[line width=0.4pt, black] 
+            ([xshift=25mm, yshift=-21mm]current page.north west) -- ++(0, -10mm);
+        \draw[line width=0.4pt, black] 
+            ([xshift=-19mm, yshift=-21mm]current page.north east) -- ++(-10mm, 0);
+        \draw[line width=0.4pt, black] 
+            ([xshift=-19mm, yshift=-21mm]current page.north east) -- ++(0, -10mm);
+        \draw[line width=0.4pt, black] 
+            ([xshift=25mm, yshift=21mm]current page.south west) -- ++(10mm, 0);
+        \draw[line width=0.4pt, black] 
+            ([xshift=25mm, yshift=21mm]current page.south west) -- ++(0, 10mm);
+        \draw[line width=0.4pt, black] 
+            ([xshift=-19mm, yshift=21mm]current page.south east) -- ++(-10mm, 0);
+        \draw[line width=0.4pt, black] 
+            ([xshift=-19mm, yshift=21mm]current page.south east) -- ++(0, 10mm);
+    \end{tikzpicture}
+
+    \begin{center}
+        \vspace*{0.2cm}
+        {\fontsize{13pt}{16pt}\selectfont \textbf{VIETNAM NATIONAL UNIVERSITY HO CHI MINH CITY}}\\[4pt]
+        {\fontsize{13pt}{16pt}\selectfont \textbf{UNIVERSITY OF SCIENCE}}\\[4pt]
+        {\fontsize{12pt}{15pt}\selectfont \textbf{FACULTY OF INFORMATION TECHNOLOGY}}\\[5pt]
+        {\fontsize{11pt}{14pt}\selectfont \textbf{ADVANCED PROGRAM IN COMPUTER SCIENCE (APCS)}}\\[8pt]
+        \noindent\rule{0.45\textwidth}{0.8pt}\\[0.6cm]
+        
+        \includegraphics[width=4.2cm]{logo.png}\\[0.6cm]
+        
+        {\fontsize{13pt}{16pt}\selectfont \textbf{COURSE PROJECT REPORT}}\\[5pt]
+        {\fontsize{12pt}{15pt}\selectfont \textbf{CS420 -- INTRODUCTION TO ARTIFICIAL INTELLIGENCE}}\\[0.8cm]
+        
+        \begin{tcolorbox}[
+            colback=white,
+            colframe=black,
+            arc=0mm,
+            boxrule=1.5pt,
+            width=0.92\textwidth,
+            halign=center
+        ]
+            \vspace{0.25cm}
+            {\fontsize{17pt}{22pt}\selectfont \textbf{WRONGWAY QUORIDOR AGENT}}\\[8pt]
+            {\fontsize{11.5pt}{16pt}\selectfont \textbf{High-Performance Game-Theoretic Search, SPSA AI Tuning Pipeline, and Tournament Evaluation}}
+            \vspace{0.25cm}
+        \end{tcolorbox}
+        
+        \vfill
+        
+        \begin{minipage}{0.84\textwidth}
+            \renewcommand{\arraystretch}{1.35}
+            \begin{tabular}{@{}ll@{}}
+                \textbf{Group Members:} & \textbf{Student ID:} \\
+                \quad \textbf{Phạm Hữu Nam} (Team Leader) & \quad \textbf{24125015} \\
+                \quad \textbf{Bùi Nguyễn Đức Trọng} & \quad \textbf{24125021} \\
+                \quad \textbf{Nguyễn Hoàng Thuận Phát} & \quad \textbf{24125072} \\
+                \quad \textbf{Vũ Quốc Lâm} & \quad \textbf{23125011} \\
+            \end{tabular}
+        \end{minipage}
+        
+        \vfill
+        \vspace*{0.3cm}
+        {\fontsize{11pt}{14pt}\selectfont \textbf{TP. HỒ CHÍ MINH, THÁNG 11/2026}}\\[0.1cm]
+    \end{center}
+\end{titlepage}
+
+\newpage
+    
+    \renewcommand{\baselinestretch}{1.05}\normalsize
+    \tableofcontents
+    \renewcommand{\baselinestretch}{1.15}\normalsize
+
+	\newpage
+
+\input{overview}
+
+\input{architecture}
+
+\input{evolution_log}
+
+\input{evaluation_improvement}
+
+\input{conclusion}
+
+%\input{references}
+
+\label{EndOfText}
+
+\end{document}

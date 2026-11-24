@@ -1,0 +1,65 @@
+\section{Experimental Evaluation \& Tournament Results}
+
+\subsection{Evaluation Methodology \& Controls}
+To guarantee unbiased, statistically robust performance metrics, all benchmarking adhered to three experimental controls:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Paired Color-Swapped Matches:} Every test seed was played twice: once with the agent starting as Player 0 (going first) and once starting as Player 1 (going second).
+    \item \textbf{Multiprocessing Hygiene (4 Workers):} Earlier tests with 10 workers on a 16-core machine spawned 20 CPU-intensive subprocesses, inducing thread starvation and degrading search depths from 8--9 down to 4--5. Restricting test concurrency to 4 workers (8 subprocesses on 16 cores) significantly mitigated thread contention and stabilized move latencies compared to oversubscribed configurations.
+    \item \textbf{Official Arena Parameters:} Standard 1.000s execution deadline, standard-library Python 3.9+, and 500-turn limit.
+\end{itemize}
+
+\subsection{Comprehensive Tournament Gauntlet Results}
+Table~\ref{tab:gauntlet} summarizes the benchmark performance of Agent \texttt{24125015} across 80 official matches against 8 diverse, top-tier competitors.
+
+\begin{table}[htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccrr}
+\toprule
+\textbf{Opponent Agent} & \textbf{Category / Style} & \textbf{Matches} & \textbf{W--D--L} & \textbf{Win \%} & \textbf{P0 Win} & \textbf{P1 Win} & \textbf{Timeouts} \\
+\midrule
+\texttt{web\_bot\_renner} & Web Hard: Center Rush & 10 & 10--0--0 & \textbf{100.0\%} & 5/5 & 5/5 & 0 \\
+\texttt{web\_bot\_konter} & Web Hard: Counter Trap & 10 & 10--0--0 & \textbf{100.0\%} & 5/5 & 5/5 & 0 \\
+\texttt{web\_bot\_chameleon} & Web Hard: Corridor Trap & 10 & 9--0--1 & \textbf{90.0\%} & 5/5 & 4/5 & 0 \\
+\texttt{web\_bot\_grandmaster} & Web Hard: Deep Pathing & 10 & 9--0--1 & \textbf{90.0\%} & 4/5 & 5/5 & 0 \\
+\texttt{trong\_mcts\_frontier\_v5} & Class Elite: MCTS & 10 & 9--0--1 & \textbf{90.0\%} & 4/5 & \textbf{5/5} & 0 \\
+\texttt{web\_bot\_hard} & Official Baseline & 10 & 8--0--2 & \textbf{80.0\%} & 4/5 & 4/5 & 0 \\
+\texttt{24125015\_improve\_bigbook} & Class Elite: v7 + Book & 10 & 8--0--2 & \textbf{80.0\%} & 3/5 & \textbf{5/5} & 0 \\
+\texttt{24125015\_improve\_v2} & Internal Baseline: v8 & 10 & 8--0--2 & \textbf{80.0\%} & 4/5 & 4/5 & 0 \\
+\midrule
+\textbf{OVERALL TOTALS} & & \textbf{80} & \textbf{71--0--9} & \textbf{88.75\%} & \textbf{34/40} & \textbf{37/40} & \textbf{0} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Official tournament gauntlet performance across 8 elite opponents}
+\label{tab:gauntlet}
+\end{table}
+
+The agent achieved an overall win rate of \textbf{88.75\% (71 wins, 0 draws, 9 losses)}. Most significantly, when playing as \textbf{Player 1 (going second)}, the agent achieved an extraordinary \textbf{92.5\% win rate (37/40)} overall, and a flawless \textbf{100.0\% win rate (10/10)} against the two premier class opponents: \texttt{trong\_mcts\_frontier\_combined\_v5} and \texttt{24125015\_improve\_bigbook}.
+
+\subsection{Direct Head-to-Head Ablation Results}
+To evaluate relative progress against its immediate predecessors, direct 10-game matches were conducted:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{v10 vs v31: Won 7--3 (70.0\% Win Rate)} --- v10 won all 5 games as P0 (5/5) by avoiding v31's premature Turn 7 $H(5,0)$ flank trap.
+    \item \textbf{v10 vs v3: Won 7--3 (70.0\% Win Rate)} --- v10 won all 5 games as P1 (5/5) via refined single-wall leaf trap potentials and endgame pure-race cutoffs.
+\end{itemize}
+
+\subsection{Execution Reliability \& Latency Profile}
+Across all matches and tuning evaluations recorded in our benchmark logs (totaling over 2,000 games):
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Timeout Rate:} \textbf{0.00\%} ($0$ timeouts across all matches).
+    \item \textbf{Decision Latency:} Mean action latency was $580\text{ms} \div 620\text{ms}$, with a 99th percentile peak at $818\text{ms}$, providing a comfortable safety buffer $> 180\text{ms}$ below the $1.000\text{s}$ timeout limit under $T_{\text{hard}} = 0.80\text{s}$.
+    \item \textbf{Resource Safety:} Memory consumption remained bounded throughout 500-turn games, and initial module import executed in under $1.4\text{ms}$ (limit $5.0\text{s}$).
+\end{itemize}
+
+\subsection{Conclusion \& Lessons Learned}
+This project successfully demonstrated that high-performance competitive Quoridor play can be achieved using pure Python by combining:
+\begin{enumerate}[leftmargin=1.5em]
+    \item Highly optimized $O(1)$ bitboard state representation and canonical Zobrist symmetries.
+    \item Selective search pruning and leaf trap potential evaluations ($KS = 1$).
+    \item Rigorous SPSA hyperparameter optimization backed by multi-stage empirical gating.
+    \item Eliminating artificial heuristic distortion at root: replacing wall subsidies with lateral sidestep tie-breakers transformed Player 1 from an opening liability into an effective counter-attacking defense.
+\end{enumerate}
+

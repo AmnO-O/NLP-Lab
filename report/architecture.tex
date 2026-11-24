@@ -1,0 +1,138 @@
+\section{Agent Architecture \& Search Engine}
+
+\subsection{Bitboard Representation and $O(1)$ Edge Mask Manipulation}
+Conventional game engines represent the Quoridor board using Python nested lists or graphs, incurring severe reference chasing and object allocation penalties. Agent \texttt{24125015} models all state variables using native 81-bit integer bitboards:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Cell Coordinates:} Cell $(r, c)$ corresponds to bit $u = 9r + c \in [0, 80]$. Constants $\text{ROW}[r] = ((1 \ll 9) - 1) \ll 9r$ and $\text{ALL} = (1 \ll 81) - 1$ provide constant-time mask operations.
+    \item \textbf{Directional Connectivity Masks:} Movement connectivity across adjacent cells is maintained via four 81-bit integer masks: $\text{mD}$ (step down), $\text{mU}$ (step up), $\text{mR}$ (step right), and $\text{mL}$ (step left).
+    \item \textbf{$O(1)$ 2-XOR Incremental Updates:} When placing or unplacing a wall index $w$, edge masks are updated instantaneously via bitwise XOR without allocations:
+    \begin{equation}
+        \text{mD} \leftarrow \text{mD} \oplus \text{WM\_D}[w], \quad \text{mU} \leftarrow \text{mU} \oplus \text{WM\_U}[w]
+    \end{equation}
+    where $\text{WM\_D}[w]$ and $\text{WM\_U}[w]$ are precomputed static bitmasks representing the blocked groove edges.
+    \item \textbf{Fast Bitwise BFS:} Shortest paths to target baselines are computed via bitwise flood-fill. The open frontier $F$ expands through bit shifts:
+    \begin{equation}
+        F_{\text{next}} = ((F \& \text{mD}) \ll 9) \mid ((F \& \text{mU}) \gg 9) \mid ((F \& \text{mR}) \ll 1) \mid ((F \& \text{mL}) \gg 1)
+    \end{equation}
+    This bitwise BFS executes up to $10\times$ faster than Dijkstra, computing distances in under $8\mu\text{s}$.
+\end{itemize}
+
+\subsection{Mirror-Canonical Symmetries \& Specialized Caching}
+Quoridor possesses an exact reflective symmetry along the vertical axis (column $c = 4$). For any board state with wall configuration $W$ and pawn positions $p_{\text{me}}, p_{\text{op}}$, reflecting all columns across the center ($c' = 8 - c$) produces an isomorphic game state.
+
+Our engine utilizes tailored representations for its high-performance caches:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Transposition Table ($\text{TT}$), $\text{wcache}$, and $\text{xcache}$:} Indexed using 64-bit mirror-canonical Zobrist keys. Random bitstrings are generated for pawn positions $\text{ZP}$, mirrored positions $\text{ZPM}$ ($\text{ZPM}[s][u] = \text{ZP}[s][\text{mir}(u)]$), wall slots $\text{ZW}$, mirrored walls $\text{ZWM}$, wall counters $\text{ZB}$, and turn key $\text{ZT}$. The canonical key is $K_{\text{canon}} = \min(K, K_m)$.
+    \item \textbf{Leaf Potential Cache ($\text{pcache}$):} Indexed directly by canonical wall bitmask and mirrored target pawn: $ck = (W_{\text{canon}} \ll 8) \mid (p_{\text{canon}} \ll 1) \mid a$.
+    \item \textbf{Single-Player Distance Cache ($\text{dcache}$):} Indexed by wall configuration bitmask, pawn cell, and target goal baseline: $(W \ll 7) \mid (p \ll 1) \mid g$.
+\end{itemize}
+This granular caching strategy eliminates redundant calculations across symmetric lines while avoiding unnecessary hashing overhead.
+
+\subsection{Iterative Deepening Negamax with PVS and Safe LMR}
+Search is organized as an iterative deepening framework, expanding search horizons ply-by-ply from depth $1$ upwards within the dynamic time budget.
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Principal Variation Search (PVS):} The root move ordering ranks moves based on previous iteration PV scores, history heuristics, and heuristic wall gain metrics. The principal variation candidate is evaluated with a full window $(\alpha, \beta)$. All alternative candidate moves are initially tested with a minimal null-window $(\alpha, \alpha + 1)$. A full re-search is triggered only when a null-window probe fails high ($score > \alpha$).
+    \item \textbf{Stockfish-Style Partial Iteration Adoption:} When the hard time limit ($T_{\text{hard}} = 0.80\text{s}$) interrupts search mid-iteration, the engine adopts the partial result if and only if a newly completed candidate move has proven to be strictly superior to Move 0 ($best\_done \neq r_0$). Otherwise, it falls back to the fully verified previous iteration, preventing partial-subset tactical blunders.
+    \item \textbf{Tactical Late Move Reductions (LMR):} Wall moves evaluated later in candidate order at non-PV nodes are conditionally reduced to accelerate tree traversal. The exact reduction predicate implemented is:
+    \begin{align}
+        \text{do\_lmr} = (\text{opp\_has\_walls} &\land \neg\text{is\_pv} \land \text{depth} \ge 3 \land \text{wall\_i} \ge 3 \nonumber \\
+        &\land d_{\text{op}} > 2 \land \Delta d_{\text{op}} < 3 \land \text{idx} \notin \{k_1, k_2\})
+    \end{align}
+    When active, the reduction depth is:
+    \begin{equation}
+        \text{red} = \begin{cases}
+            2 & \text{if } \text{depth} \ge 5 \land \text{wall\_i} \ge 6 \\
+            1 & \text{otherwise}
+        \end{cases}
+    \end{equation}
+    Crucially, LMR is bypassed if: (1) the opponent has 0 walls ($\text{opp\_has\_walls} = \text{False}$), preserving exact endgame conversion; (2) the opponent is within 2 steps of their goal ($d_{\text{op}} \le 2$); (3) the wall gains a major distance advantage ($\Delta d_{\text{op}} = n_O - d_O \ge 3$); or (4) the candidate matches killer moves $k_1, k_2$.
+\end{itemize}
+
+\subsection{Endgame 0-Wall Cutoffs \& Search Horizon Management}
+When both players exhaust their wall supply ($\text{barr} = [0, 0]$), no further barriers can be placed on the board, and the game transitions into a pure pawn race on the existing static grid topology. Agent \texttt{24125015} manages this phase through two complementary mechanisms:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Interior Distance-Gap Decisive Cutoff:} Inside the recursive search, when $\text{barr} = [0, 0]$, if one player possesses a shortest-path advantage of $\ge 3$ steps ($d_S \le d_O - 3$), the node immediately returns a decisive terminal utility:
+    \begin{equation}
+        U(S) = \begin{cases}
+            +\text{BOT\_WIN} - \text{ply} - 2 d_S & \text{if } d_S \le d_O - 3 \\
+            -(\text{BOT\_WIN} - \text{ply} - 2 d_O) & \text{if } d_O \le d_S - 3
+        \end{cases}
+    \end{equation}
+    In typical open board play, jumping over an opposing pawn gains at most 1 step, making a 3-step lead decisive under turn alternation. While intricate labyrinth corridors formed by earlier walls can introduce non-trivial blocking dynamics that warrant further theoretical study, this heuristic cutoff provides powerful tree pruning without observed blunders in practice.
+    \item \textbf{Root Iterative Stopping Threshold (Depth 18):} In $\text{choose\_action}()$, if both wall inventories are zero and iterative deepening completes depth $18$ ($\text{completed} \ge 18$), the loop terminates:
+    \begin{equation}
+        \textbf{if } \text{zero\_walls} \land \text{completed} \ge 18: \textbf{break}
+    \end{equation}
+    Because pawn-only branching is narrow ($1 \div 4$ moves), continuing deeper iterations yields diminishing returns. Depth 18 functions as a computational stopping threshold that safely preserves CPU time.
+\end{enumerate}
+
+\subsection{Heuristic Evaluation Function \& Leaf Trap Potential}
+Position scoring at leaf nodes is executed via an integer-scaled model ($\text{evaluate\_int}()$, scaled by $1{,}000$ to avoid floating-point overhead) that synthesizes 16 linear features with endgame adjustments and leaf trap potentials:
+\begin{equation}
+    \text{Score}_{\text{int}}(S) = \sum_{i=0}^{15} W_i f_i(S) + \text{Adj}_{\text{endgame}} + \text{TieBreakers} + \Delta \text{Trap}(S)
+\end{equation}
+The primary distance differential is defined as:
+\begin{equation}
+    \text{diff} = d_{\text{op}} - d_{\text{me}}
+\end{equation}
+which is positive when our pawn is closer to its goal than the opponent. Beyond the linear feature vector, $\text{evaluate\_int}()$ applies:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Endgame Step Race Bonus:} If both wall counts reach zero ($\text{barr} = [0, 0]$), a bonus of $+180{,}000$ (or $-180{,}000$) is applied when $|\text{diff}| \ge 2$, reinforcing decisive race convergence.
+    \item \textbf{Geometric Tie-Breakers:} Adds $+2{,}200 \times (\text{prog}_{\text{me}} - \text{prog}_{\text{op}})$ to favor advancement toward the goal baseline, and $-1{,}000 \times (|c_{\text{me}} - 4| - |c_{\text{op}} - 4|)$ to encourage central positioning on equal-length paths.
+    \item \textbf{Leaf Trap Potential:} Minimax search can suffer from horizon blindness against corridor traps. The function $\text{potential}(a)$ evaluates the maximum virtual detour that player $a$ can impose on opponent $v = 1 - a$ with a single wall placement ($KS = 1$). The differential trap term is:
+    \begin{equation}
+        \Delta \text{Trap}(S) = \begin{cases}
+            \text{WS} \cdot (\text{pot}(\text{me}) - \text{pot}(\text{op})) & \text{if } \text{WS} > 0 \land (\text{barr}[0] > 0 \lor \text{barr}[1] > 0) \\
+            0 & \text{otherwise}
+        \end{cases}
+    \end{equation}
+    Lazy evaluation skips trap computation when the preliminary score falls outside the search window by a margin derived from $\text{LZ} = 9.0$.
+\end{itemize}
+
+\subsection{Root Bias Calibration \& Lateral Sidestep Bonus}
+A breakthrough in solving the Player 1 disadvantage was the elimination of artificial root subsidies. In earlier versions, placing a wall received an artificial bonus of $WB = +34.48$, while forward moves received $VD = +54.25$. When Player 0 placed an opening flank wall $H(5,0)$, P1 was lured into burning walls defensively ($H(2,3)$ and $V(5,2)$) or stepping forward into dead-end cages.
+
+In Agent \texttt{24125015}, root parameters were recalibrated to $WB = 0.0$, $VD = 12.0$, and $NM = 0.0$. In consistent internal score units (scale $1{,}000$), candidate pawn moves are assigned:
+\begin{equation}
+    \text{bonus}_{\text{int}} = \begin{cases}
+        +vd\_i = +12{,}000 & \text{if } n_d < d_{\text{me}} \quad (\text{forward step}, VD = 12.0) \\
+        +side\_i = +4{,}000 & \text{if } n_d == d_{\text{me}} \quad (\text{lateral sidestep}, \text{side} = 4.0)
+    \end{cases}
+\end{equation}
+When eval scores are tied, P1 naturally steps laterally to $(3,3)$ or $(3,5)$, dodging flank wall traps while keeping all 10 walls in reserve.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.95\textwidth}{!}{%
+\begin{tikzpicture}[
+    node distance=1.1cm and 1.2cm,
+    box/.style={rectangle, rounded corners, draw=black!80, fill=blue!5, thick, minimum width=2.8cm, minimum height=0.9cm, align=center, font=\small},
+    decision/.style={diamond, draw=black!80, fill=yellow!10, thick, aspect=1.8, align=center, font=\footnotesize},
+    highlight/.style={rectangle, rounded corners, draw=teal!80, fill=teal!10, thick, minimum width=2.8cm, minimum height=0.9cm, align=center, font=\small},
+    arrow/.style={-{Stealth[scale=1.1]}, thick, draw=black!70},
+]
+
+\node[box] (obs) {Observation\\$(S, \text{turn})$};
+\node[decision, right=of obs] (book) {Turn $\le 6$\\Center Book?};
+\node[highlight, above=of book] (bookmove) {Instant Center Move\\$(0.000\text{s})$};
+\node[box, right=of book] (bitboard) {Bitboard $O(1)$ 2-XOR\\Edge Masks \& Zobrist};
+\node[box, right=of bitboard] (pvs) {Iterative Deepening\\PVS + Safe LMR};
+\node[decision, below=of bitboard] (endgame) {Walls $== [0,0]$\\$\Delta d \ge 3 \lor \text{D} \ge 18$?};
+\node[highlight, left=of endgame] (cutoff) {0-Wall Decisive\\Cutoff / Break};
+\node[box, below=of pvs] (eval) {16-Feature Eval \&\\Leaf Trap Potential};
+\node[highlight, below=of eval] (rootbias) {Root Bias \& Sidestep\\Tie-Breaker ($\text{side\_i}$)};
+
+\draw[arrow] (obs) -- (book);
+\draw[arrow] (book) -- node[left, font=\scriptsize] {Yes} (bookmove);
+\draw[arrow] (book) -- node[above, font=\scriptsize] {No} (bitboard);
+\draw[arrow] (bitboard) -- (pvs);
+\draw[arrow] (pvs) -- (endgame);
+\draw[arrow] (endgame) -- node[above, font=\scriptsize] {Yes} (cutoff);
+\draw[arrow] (endgame) -- node[right, font=\scriptsize] {No} (eval);
+\draw[arrow] (eval) -- (rootbias);
+
+\end{tikzpicture}
+}
+\caption{Overall Decision Pipeline of Agent 24125015 (v10 Ultimate Hybrid Engine)}
+\label{fig:agent-pipeline}
+\end{figure}

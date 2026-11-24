@@ -39,6 +39,8 @@ def build(root, model="qwen", portable=False):
          'run("-m", "pip", "install", "-e", ".[test]")\n'
          'requirement = "paddle" if MODEL == "paddle" else "internvl" if MODEL == "internvl" else "vlm"\n'
          'run("-m", "pip", "install", "-r", f"requirements/{requirement}.txt")\n'
+         'if MODEL != "paddle":\n'
+         '    run("-m", "pip", "install", "-U", "nvidia-nccl-cu12")\n'
          'if MODEL == "paddle":\n'
          '    # Change this index if the Kaggle CUDA environment requires another wheel.\n'
          '    run("-m", "pip", "install", "paddlepaddle-gpu==3.2.0", "-i",\n'

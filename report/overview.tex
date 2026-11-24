@@ -1,0 +1,39 @@
+\section{Project Overview \& Core Ideas}
+
+\subsection{Quoridor Game Specifications and Constraints}
+Quoridor is an adversarial, two-player zero-sum abstract strategy game played on a $9 \times 9$ grid. Each player begins with a pawn situated at their starting baseline and a reserve of $10$ walls. The primary objective is to maneuver one's pawn across the board to any cell in the opponent's starting row before the opponent accomplishes the reverse:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Player 0 (P0):} Starts at coordinate $[8, 4]$ (bottom row) and aims to reach row $0$. Player 0 moves first.
+    \item \textbf{Player 1 (P1):} Starts at coordinate $[0, 4]$ (top row) and aims to reach row $8$. Player 1 moves second.
+\end{itemize}
+
+On each turn, an agent must execute exactly one of three actions within a strict execution deadline of \textbf{1.000 second}:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Move Pawn:} Advance one orthogonal step to an adjacent cell through an open edge. When adjacent to the opponent pawn and unblocked, the pawn can jump straight over; if blocked behind the opponent by a wall or board border, diagonal hops are permitted.
+    \item \textbf{Place Wall:} Position a $2$-unit wall horizontally ($H$) or vertically ($V$) along the grid grooves. Walls cannot overlap, intersect, or completely seal off either player's path to their respective goal baseline.
+    \item \textbf{Pass:} Forfeit the active turn (effectively an emergency fallback).
+\end{enumerate}
+
+The match is terminated as a victory as soon as a pawn steps onto its target goal row, or declared a draw if neither player wins within $500$ collective turns. Any action exceeding the $1.0\text{s}$ time limit, raising an unhandled exception, or attempting an illegal move forfeits the active turn.
+
+\subsection{Origin of Benchmark Opponents \& the \texttt{wrongway.app} Suite}
+To evaluate our agent against diverse, competitive tactics rather than simple static heuristics, our team established an external sparring framework interfaced directly with the official competitive web platform \textbf{\texttt{wrongway.app}}. We extracted and wrapped the production JavaScript engine from \texttt{wrongway.app} via Node.js IPC to create a comprehensive test suite of five distinct play styles:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{\texttt{web\_bot\_hard} (Mauerer Style):} The official web hard bot utilizing an advanced Alpha-Beta search engine focused on aggressive blockade building and corridor chokes.
+    \item \textbf{\texttt{web\_bot\_renner} (Runner Style):} An ultra-aggressive pure speedrun rusher ($VD = 40, WB = -40$) that hoards walls exclusively for game-ending lines.
+    \item \textbf{\texttt{web\_bot\_konter} (Counter-Puncher Style):} A balanced, highly tactical engine operating with zero artificial wall bias ($WB = 0, VD = 0$), maintaining path flexibility and punishing premature commitments.
+    \item \textbf{\texttt{web\_bot\_chameleon} (Adaptive Multi-Style):} An anti-overfitting bot that randomly shifts core styles and applies dynamic weight jittering ($\pm 8\%$) every match.
+    \item \textbf{\texttt{web\_bot\_grandmaster} (Deep Search Engine):} A deep Alpha-Beta engine with a $650,000$ node budget, expanded candidate branching, and multi-step trap defense ($XP = 3$).
+\end{itemize}
+Along with elite peer agents developed by other student teams (e.g., \texttt{trong\_mcts\_frontier\_combined\_v5} and \texttt{24125015\_improve\_bigbook}), this diverse suite provided our primary training gauntlet.
+
+\subsection{Key Ideas Behind Agent 24125015}
+Our agent's development began with a basic Negamax search and simple distance differences. However, initial wall generation was terribly slow and naive, causing shallow search and frequent tactical blindness. Through reverse-engineering insights from \texttt{web\_bot\_hard} and extensive AI parameter tuning, we synthesized Agent \texttt{24125015} (the \textit{v10 Ultimate Hybrid Engine}) based on six foundational pillars:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Incremental Bitboard Engine ($O(1)$ 2-XOR):} All 81 board cells and directional edge connections are represented as 81-bit integer masks. Adding or removing a wall requires exactly one bitwise XOR operation per cardinal direction, eliminating Python object allocation and achieving high throughput during tree search.
+    \item \textbf{Horizontal-Mirror Canonical Zobrist Symmetries:} Every board state is mapped to its horizontal reflection across column $c = 4$. Transposition Table (TT), wall caches, and distance caches index only the canonical symmetry, halving memory usage and unifying symmetrical opening and endgame positions.
+    \item \textbf{Iterative Deepening Negamax with PVS \& Safe LMR:} The search tree is explored via Principal Variation Search (PVS) with strict null-window refutations for non-PV moves. Non-tactical wall moves late in candidate order ($\text{wall\_i} \ge 3$) are pruned via Late Move Reductions (LMR), while big distance-gain walls ($\Delta d \ge 3$) and bottleneck closures are strictly protected.
+    \item \textbf{Endgame 0-Wall Cutoffs:} When both players exhaust their walls ($\text{barr} = [0, 0]$), a path lead of $\ge 3$ steps immediately returns a decisive score in $O(1)$, while completing depth 18 in iterative deepening serves as a computational stopping threshold to save CPU budget.
+    \item \textbf{Leaf Trap Potential ($\text{potential}()$):} Leaf evaluations calculate virtual single-wall detour expansions ($KS = 1$), penalizing positions where the opponent can force our pawn into a corridor detour, with 2-wall extensions preserved from earlier experiments.
+    \item \textbf{Calibrated Root Bias \& Sidestep Tie-Breaker:} Inspired by the \textit{Konter} style of \texttt{web\_bot\_hard}, eliminating artificial wall subsidies ($WB = 0.0, VD = 12.0, NM = 0.0$) and adding a lateral sidestep bonus ($\text{side\_i} = 4000$) allows P1 to naturally break opponent flank attacks via sideways steps to $(3,3)$ or $(3,5)$, preserving all 10 walls and converting P1 into an effective counter-attacking defense.
+\end{enumerate}

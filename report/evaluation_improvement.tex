@@ -1,0 +1,48 @@
+\section{AI-Driven Auto-Tuning Pipeline}
+
+\subsection{SPSA Optimization Framework}
+Handcrafting evaluation weights and search pruning thresholds in a game with $130+$ branching factor inevitably leads to suboptimal local equilibria. To systematically explore the parameter space, our team implemented an automated \textbf{Simultaneous Perturbation Stochastic Approximation (SPSA)} framework (Spall, 1998).
+
+Unlike finite-difference gradient estimation which requires $2p$ evaluations per gradient step (where $p$ is the dimension of the parameter vector), SPSA evaluates only two perturbed points regardless of dimension by applying simultaneous random perturbations:
+\begin{equation}
+    \theta_k^+ = \theta_k + c_k \Delta_k, \quad \theta_k^- = \theta_k - c_k \Delta_k
+\end{equation}
+where $\Delta_k \in \{-1, +1\}^p$ is a vector of independent, symmetric Bernoulli random variables. The simultaneous gradient approximation $\hat{g}_k(\theta_k)$ is computed as:
+\begin{equation}
+    \hat{g}_k(\theta_k) = \frac{y(\theta_k^+) - y(\theta_k^-)}{2 c_k} \begin{bmatrix} \Delta_{k,1}^{-1} \\ \Delta_{k,2}^{-1} \\ \vdots \\ \Delta_{k,p}^{-1} \end{bmatrix}
+\end{equation}
+The parameter vector is updated iteratively following the standard stochastic gradient descent equation:
+\begin{equation}
+    \theta_{k+1} = \theta_k - a_k \hat{g}_k(\theta_k)
+\end{equation}
+with gain sequences $a_k = a / (k + 1 + A)^\alpha$ and $c_k = c / (k + 1)^\gamma$ satisfying standard Robbins-Monro convergence conditions ($\alpha = 0.602, \gamma = 0.101$).
+
+\subsection{Targeted Subspace \& Tuned Parameters}
+The tuning pipeline targeted 6 sensitive hyperparameters governing search breadth, pruning, and leaf evaluation:
+\begin{itemize}[leftmargin=1.5em]
+    \item $K \in [6, 12]$: Internal search wall candidate breadth limit (number of wall candidates expanded at recursive search nodes).
+    \item $K_D \in [3, 8]$: Deeper search plies wall candidate breadth limit.
+    \item $T_F \in [0.10, 0.40]$: Iterative deepening time safety fraction ($T_F \times \text{last\_iter}$ checked against deadline).
+    \item $AW \in [0.30, 0.80]$: Wall adjacency bonus (rewards placing candidate walls adjacent to existing walls to build continuous blockades).
+    \item $WL \in [0.80, 1.80]$: Wall self-lengthening penalty (penalizes candidate walls that inadvertently increase our own shortest path distance).
+    \item $WS \in [30.0, 50.0]$: Leaf trap corridor potential scaling factor.
+\end{itemize}
+
+The SPSA tuning loop ran for $30$ iterations, evaluating a total of $1,200$ automated paired-color matches. SPSA Iteration 20 emerged as an optimal balanced baseline:
+\begin{equation}
+    AW \approx 0.45, \quad WL \approx 1.45, \quad WS \approx 42.0, \quad T_F = 0.15, \quad K = 10, \quad K_D = 6
+\end{equation}
+Subsequent fine-tuning against cross-team peer bots and official web benchmarks produced the finalized active configuration deployed in the submitted agent (\texttt{24125015.py}):
+\begin{equation}
+    AW = 0.579, \quad WL = 1.281, \quad WS = 40.0, \quad KS = 1, \quad T_F = 0.15, \quad K = 10, \quad K_D = 6
+\end{equation}
+
+\subsection{Multi-Stage Statistical Gating Pipeline}
+To ensure that generated parameter variants represented genuine performance gains rather than stochastic noise, every candidate was subjected to a four-stage validation gate:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Gate 1: Fast Blitz Screening (0.10s):} A 40-game paired-color blitz gauntlet designed to instantly detect crashes, timeout spikes, or catastrophic regressions in runtime behavior.
+    \item \textbf{Gate 2: Head-to-Head Verification Gate (0.80s):} A 40-game paired-color evaluation match against the incumbent champion at full match budget ($0.80\text{s}$). Candidate Iteration 20 demonstrated empirical progress with $22\text{W} - 18\text{L}$ ($55.0\%$ win rate, corresponding to an estimated $+35\text{ Elo}$ advantage over the baseline). (Note: While a formal Sequential Probability Ratio Test (SPRT) with $\alpha=\beta=0.05$ requires several hundred games to reach the theoretical decision boundary $LLR \ge 2.944$, this 40-game sample served as a preliminary screening result with $LLR \approx 0.099$ used to advance the candidate to diverse pool testing).
+    \item \textbf{Gate 3: Diverse Pool Gauntlet:} Evaluated across a heterogeneous pool of agent architectures, including aggressive rushers (\texttt{greedy}, \texttt{renner}), corridor trappers (\texttt{chameleon}), and MCTS agents (\texttt{trong\_mcts}).
+    \item \textbf{Gate 4: Official Arena Compliance:} Strict verification of memory bounds, standard-library purity, zero invalid moves, and zero timeouts under the official $1.00\text{s}$ arena harness.
+\end{enumerate}

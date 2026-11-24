@@ -1,0 +1,82 @@
+\section{Development Process \& Evolutionary History}
+
+\subsection{Initial Architecture and Early Bottlenecks}
+Our initial implementation began as a straightforward textbook Negamax search using a basic linear evaluation based on path distance differences:
+\begin{equation}
+    E_{\text{initial}}(S) = d_{\text{op}} - d_{\text{me}}
+\end{equation}
+While functional against random or greedy agents, this baseline encountered severe computational and tactical bottlenecks as soon as it faced competent opponents:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Naive Wall Candidate Scoring:} The original \texttt{scored\_walls} function iterated naively over all legal wall slots using Python list structures, performing a full graph BFS for every potential wall. This naive approach took $600\text{ms}\div 900\text{ms}$ simply generating candidate moves at the root, capping iterative deepening at a shallow depth of $3\div 4$ plies.
+    \item \textbf{Tactical Blindness to Bottlenecks:} Because candidate wall evaluation was restricted to a narrow neighborhood ($TL = 6$) around the opponent pawn, the engine was blind to long-range choke points ($8\div 12$ steps away). The agent repeatedly placed passive, ineffective walls near the opponent rather than cutting the true bottleneck upstream.
+    \item \textbf{Branching Explosion and Timeouts:} Without aggressive move ordering or transposition caching, the game tree exploded exponentially, leading to severe time pressure and near-timeout panics.
+\end{itemize}
+
+\subsection{Learning from \texttt{web\_bot\_hard} and the Sparring Gauntlet}
+To overcome these limitations, we turned to the \textbf{\texttt{wrongway.app}} production engine as an external benchmark. By analyzing the execution logs and move choices of \texttt{web\_bot\_hard} and its \textit{Konter} variant, we extracted three crucial design insights:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Zero Wall Subsidy ($WB = 0$):} \texttt{web\_bot\_konter} operates with zero artificial bonus for placing walls. It places a wall if and only if the resulting path differential strictly exceeds the tempo lost by not moving the pawn.
+    \item \textbf{Path Flexibility \& Sidestepping:} Rather than burning walls defensively when an opponent threatens a flank wall, \texttt{web\_bot\_hard} takes lateral sidesteps ($n_d == d_{\text{me}}$), maintaining high path mobility and saving its wall reserve for decisive endgame lines.
+    \item \textbf{Selective Deep Wall Horizons:} Top engines do not scan all 128 wall slots equally; they evaluate the full directed acyclic graph (DAG) of the opponent's shortest paths at shallow plies ($TL = 99$), pruning passive walls that fail to alter path lengths.
+\end{enumerate}
+
+Inspired by these principles, we completely redesigned our engine: replacing Python graph structures with $O(1)$ 2-XOR Bitboards, implementing mirror-canonical Zobrist hashing, and adding funnel and wing wall candidate generators. This increased node throughput from $1,200$ to over $80,000$ evaluations/second.
+
+\subsection{Cross-Team Online Sparring \& The 9-Game Loss Diagnostic}
+After establishing our accelerated engine, we engaged in extensive cross-team sparring matches against premier peer agents developed by other student teams (most notably \texttt{trong\_mcts\_frontier\_combined\_v5} and \texttt{24125015\_improve\_bigbook}).
+
+While our agent performed strongly as Player 0 (going first), a rigorous audit of 9 loss logs revealed that \textbf{7 of the 9 losses occurred when playing as Player 1 (going second)}. Detailed state analysis identified the root causes:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Distorted Root Bonuses ($WB = 34.48, VD = 54.25$):} Facing an opening flank wall $T_7 H(5,0)$, P1's mathematically optimal response is a lateral sidestep to $(3,3)$ or $(3,5)$. However, because our older code granted $+34.48$ for placing walls and $0$ for sidesteps ($n_d == d_{\text{Me}}$), the agent was coerced into burning walls prematurely ($T_8 H(2,3)$ and $T_{12} V(5,2)$), boxing itself in and squandering its wall reserve.
+    \item \textbf{Distant Bottleneck Blindness ($TL = 6$):} In midgame positions where path lengths reached $12\text{--}18$ steps, scanning only walls within distance 6 missed critical closures ($H(5,7)$ at distance 8 and $H(5,0)$ at distance 12).
+    \item \textbf{Endgame Depth Starvation:} In endgames with 0 walls, the tree squandered search depth on solved races.
+\end{enumerate}
+
+\subsection{AI-Assisted Code Variant Generation \& Selection Pipeline}
+To explore diverse architectural paradigms efficiently within the project timeline, our team leveraged state-of-the-art LLM coding assistants (Google Antigravity, Anthropic Claude 3.5 Sonnet, and Gemini CLI) to generate, optimize, and refactor distinct executable code candidates. 
+
+\paragraph{Scope of AI Generation:} The AI tools were tasked with implementing non-trivial algorithmic modules, including: (1) low-level $O(1)$ 2-XOR bitboard edge mask transformations and bitwise BFS flood-fill routines; (2) candidate search frameworks spanning pure Alpha-Beta, MCTS, and Principal Variation Search (PVS) with Late Move Reductions; (3) mirror-canonical symmetry indexing for Zobrist hashing; (4) automated SPSA tuning scripts and Node.js IPC harnesses for \texttt{wrongway.app}; and (5) leaf corridor trap detectors ($\text{potential}()$).
+
+\paragraph{Variant Scale vs. Parameter Trials:} It is vital to distinguish between architectural code variants and hyperparameter tuning trials:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Code Architecture Variants:} We generated and evaluated over \textbf{15 distinct standalone Python agent files} (summarized in Table~\ref{tab:versions} and preserved in our project repository), exploring fundamentally distinct search strategies, move ordering heuristics, and trap evaluation depths.
+    \item \textbf{SPSA Parameter Optimization:} Completely separate from code rewrites, our automated SPSA optimizer evaluated \textbf{30 iterations} consisting of $60$ perturbed parameter vectors across $1{,}200$ automated paired-color matches to tune continuous numeric weights within the selected architecture.
+\end{itemize}
+
+\paragraph{Candidate Retention Criteria:} To prevent regressions and style-specific overfitting, code variants were filtered through three mandatory criteria:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Strict Runtime Reliability:} Candidate code had to achieve $0$ timeouts under the official $1.0\text{s}$ limit (with 99th percentile decision latency $< 850\text{ms}$), $0$ illegal moves, and bounded memory consumption across full 500-turn matches.
+    \item \textbf{Empirical Match Superiority:} A candidate had to score a positive win rate delta ($> 55\%$, corresponding to estimated $\text{Elo} > +30$) against the incumbent champion in paired-color (color-swapped) evaluation sets.
+    \item \textbf{Cross-Opponent Robustness:} The agent had to maintain balanced, competitive performance across diverse opponent archetypes (speedrun rushers, counter-trappers, and tree-search peer bots). Variants that achieved high scores against one specific bot but collapsed against others (such as v9.1's rigid Turn 7 book failing against BigBook) were systematically disqualified.
+\end{enumerate}
+
+\begin{table}[htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{lp{4.2cm}p{6.8cm}c}
+\toprule
+\textbf{Ver.} & \textbf{Core Additions} & \textbf{Observed Behavior \& Limitations} & \textbf{Status} \\
+\midrule
+\textbf{v1} & Greedy baseline BFS pathfinder. & 0 lookahead; easily walled into detours. & Baseline \\
+\textbf{v2} & Basic Negamax, naive wall scoring. & Reached depth 4; slow Python BFS; timeouts. & Superseded \\
+\textbf{v3} & Wider wall beam, partial iterations. & Promoted as initial champion (+33.1 Elo vs v2). & Champion \\
+\textbf{v4--v6} & Interior PVS, aggressive LMR. & Regressed (-63 Elo); pruned critical defensive walls. & Parked \\
+\textbf{v7--v8} & Bitboard engine, SPSA tuning. & 80\% vs web bots, but 0\% as P1 vs BigBook. & Active \\
+\textbf{v9} & Loss audit: root alignment, 0-wall cutoffs. & Solved P1 vulnerability (100\% P1 vs BigBook, +190 Elo). & Elite \\
+\textbf{v9.1} & Tested 2-wall trap ($KS=2$), rigid Turn 7. & Rigid $H(5,0)$ book caused P0 losses vs BigBook. & Experimental \\
+\textbf{v10} & \textbf{Fast single-wall trap ($KS=1$), root tune.} & \textbf{Beat v31 (7--3) and v3 (7--3) head-to-head.} & \textbf{Official} \\
+\bottomrule
+\end{tabularx}
+\caption{Evolutionary generations of Agent 24125015}
+\label{tab:versions}
+\end{table}
+
+\subsection{Synthesizing the Final v10 Champion}
+Prior to final submission, two candidate engines competed for promotion:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{v9 Engine (v3):} Unlocked 100\% P1 defense via root bonus alignment, but lacked explicit leaf trap potential.
+    \item \textbf{v9.1 Engine (v31):} Explored 2-wall leaf trap potential ($KS = 2$), but hardcoded an opening wall $H(5,0)$ on Turn 7 that lost 4 of 5 games as P0 against BigBook.
+\end{itemize}
+
+In Agent \textbf{v10} (\texttt{24125015.py}), we synthesized the final architecture: focusing leaf trap evaluation on the efficient single-wall detector ($KS = 1, WS = 40.0$) to strictly respect search time budgets, removing the rigid Turn 7 hardcoding, and retaining root calibration with the lateral sidestep bonus ($\text{side\_i} = 4000$). Direct head-to-head benchmarking confirmed this configuration: v10 defeated v31 $7\text{--}3$ ($100\%$ P0 win rate) and defeated v3 $7\text{--}3$ ($100\%$ P1 win rate).
