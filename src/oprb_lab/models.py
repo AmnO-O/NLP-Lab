@@ -12,10 +12,31 @@ MODELS = {
     "rapid": "PP-OCRv4-Mobile-ONNX (rapidocr_onnxruntime-1.4.4)",
     "easyocr": "EasyOCR-English-CRAFT+CRNN",
     "tesseract": "Tesseract-eng-tessdata_fast",
-    "granite": "ibm-granite/granite-docling-258M",
+    "internvl": "OpenGVLab/InternVL2_5-1B",
 }
-PROMPT = "Convert this page to docling."
-TORCH_MODELS = {"easyocr", "granite"}
+PROMPT = ("Transcribe all text visible on this document page in natural reading order. "
+          "Return only the transcription. Do not explain, describe, or invent unreadable text.")
+TORCH_MODELS = {"easyocr", "internvl"}
+
+
+def intern_tiles(image, max_tiles=12, size=448):
+    """Dynamic grid + thumbnail, adapted from the official InternVL model card."""
+    w, h = image.size
+    ratios = sorted({(i, j) for i in range(1, max_tiles + 1)
+                     for j in range(1, max_tiles + 1) if i * j <= max_tiles},
+                    key=lambda p: (p[0] * p[1], p[0], p[1]))
+    best, distance = (1, 1), float("inf")
+    for ratio in ratios:
+        diff = abs(w / h - ratio[0] / ratio[1])
+        if diff < distance or (diff == distance and w * h > .5 * size * size * ratio[0] * ratio[1]):
+            best, distance = ratio, diff
+    cols, rows = best
+    resized = image.resize((cols * size, rows * size))
+    tiles = [resized.crop((x * size, y * size, (x + 1) * size, (y + 1) * size))
+             for y in range(rows) for x in range(cols)]
+    if len(tiles) > 1:
+        tiles.append(image.resize((size, size)))
+    return tiles
 
 
 def output_text(text, raw=None, tokens=None, truncated=False):
@@ -46,11 +67,11 @@ def ort_session(component):
 
 
 class Adapter:
-    def __init__(self, name, revision=None, max_tokens=4096, max_pixels=None, max_tiles=None,
+    def __init__(self, name, revision=None, max_tokens=4096, max_pixels=None, max_tiles=12,
                  rec_batch_size=16, tessdata=None):
         if name not in MODELS:
             raise ValueError(f"Unknown model: {name}")
-        self.name, self.max_tokens, self.rec_batch_size = name, max_tokens, rec_batch_size
+        self.name, self.max_tokens, self.max_tiles, self.rec_batch_size = name, max_tokens, max_tiles or 12, rec_batch_size
         self.parameter_count = None
         self.metadata = {}
         if name == "paddle":
@@ -105,11 +126,12 @@ class Adapter:
             if cache:
                 self.metadata["weight_hashes"] = {path.name: sha(path) for path in Path(cache).glob("*.pth")}
             return
-        from transformers import AutoProcessor, AutoModelForImageTextToText
-        self.processor = AutoProcessor.from_pretrained(MODELS[name], revision=revision)
-        self.processor.tokenizer.padding_side = "left"
-        self.model = AutoModelForImageTextToText.from_pretrained(MODELS[name], revision=revision,
-                    torch_dtype=self.dtype, low_cpu_mem_usage=True, attn_implementation="sdpa").to(self.device).eval()
+        from transformers import AutoModel, AutoTokenizer
+        self.model = AutoModel.from_pretrained(MODELS[name], revision=revision, trust_remote_code=True,
+                                               use_flash_attn=False, torch_dtype=self.dtype,
+                                               low_cpu_mem_usage=True).to(self.device).eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(MODELS[name], revision=revision,
+                                                       trust_remote_code=True, use_fast=False)
         self.parameter_count = sum(p.numel() for p in self.model.parameters())
 
     def predict(self, path):
@@ -126,32 +148,16 @@ class Adapter:
             text = subprocess.check_output([self.binary, str(path), "stdout", "--tessdata-dir", str(self.tessdata),
                                            "-l", "eng", "--oem", "1", "--psm", "3"], text=True, encoding="utf-8", timeout=180)
             return output_text(text.strip())
-        return self.predict_batch([path])[0]
+        from torchvision.transforms import Compose, ToTensor, Normalize
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+        transform = Compose([ToTensor(), Normalize((.485, .456, .406), (.229, .224, .225))])
+        with self.torch.inference_mode():
+            pixels = self.torch.stack([transform(tile) for tile in intern_tiles(image, self.max_tiles)])
+            pixels = pixels.to(device=self.device, dtype=self.dtype)
+            raw = self.model.chat(self.tokenizer, pixels, "<image>\n" + PROMPT,
+                                  dict(max_new_tokens=self.max_tokens, do_sample=False), history=None)
+        return output_text(raw, raw, None, None)
 
     def predict_batch(self, paths):
-        if self.name != "granite":
-            return [self.predict(path) for path in paths]
-        from docling_core.types.doc import DoclingDocument
-        from docling_core.types.doc.document import DocTagsDocument
-        images = []
-        for path in paths:
-            with Image.open(path) as source:
-                images.append(source.convert("RGB"))
-        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": PROMPT}]}]
-        prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.processor(text=[prompt] * len(images), images=images, padding=True, return_tensors="pt").to(self.device)
-        for key, tensor in inputs.items():
-            if tensor.is_floating_point():
-                inputs[key] = tensor.to(self.dtype)
-        with self.torch.inference_mode():
-            generated = self.model.generate(**inputs, max_new_tokens=self.max_tokens, do_sample=False)
-        answers = []
-        for ids, image in zip(generated[:, inputs["input_ids"].shape[-1]:], images):
-            eos = self.model.generation_config.eos_token_id
-            eos = eos if isinstance(eos, list) else [eos]
-            tokens = ids.tolist()
-            stop = next((i + 1 for i, token in enumerate(tokens) if token in eos), len(tokens))
-            raw = self.processor.decode(ids[:stop], skip_special_tokens=False, clean_up_tokenization_spaces=False)
-            doc = DoclingDocument.load_from_doctags(DocTagsDocument.from_doctags_and_image_pairs([raw], [image]), document_name="page")
-            answers.append(output_text(doc.export_to_text(), raw, stop, stop >= self.max_tokens))
-        return answers
+        return [self.predict(path) for path in paths]

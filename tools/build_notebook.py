@@ -20,13 +20,13 @@ def build(root, model='paddle', portable=False, suite=False):
     setup += ('BASE = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path("/content") if Path("/content").exists() else Path.cwd()\n'
               if portable else 'BASE = Path("/kaggle/working")\n')
     setup += f'MODEL = {model!r}\n' + ('GPUS = "0"\n' if portable else 'GPUS = "0,1"\n') + SETUP
-    cells = [cell('markdown', '# OPRB: four lightweight OCR pipelines + Granite-Docling\n'
+    cells = [cell('markdown', '# OPRB: four lightweight OCR pipelines + InternVL2.5-1B\n'
                   'Kaggle: Internet ON, T4 x2. LIMIT=5 is a smoke test; None selects all 9,000 pages. '
                   'Recognition batching is not page batching. Tesseract uses CPU processes. '
                   'Each model runs in a separate virtualenv. Download results before ending the session.\n'), cell('code', setup)]
     if suite:
         source = f'INSTALL_CELL = {INSTALL!r}\nGPU_DATA_CELL = {GPU_DATA!r}\nRUN_CELL = {RUN!r}\n'
-        source += 'MODELS_TO_RUN = ["paddle", "rapid", "easyocr", "tesseract", "granite"]\nfailures = {}\n'
+        source += 'MODELS_TO_RUN = ["paddle", "rapid", "easyocr", "tesseract", "internvl"]\nfailures = {}\n'
         source += 'for MODEL in MODELS_TO_RUN:\n    try:\n        PYTHON = sys.executable\n        exec(INSTALL_CELL)\n        exec(GPU_DATA_CELL)\n        exec(RUN_CELL)\n    except Exception as error:\n        import traceback\n        traceback.print_exc()\n        failures[MODEL] = repr(error)\n'
         source += '(BASE / "suite_status.json").write_text(json.dumps(failures, indent=2))\n' + EXPORT
         source += '\nassert not failures, f"Incomplete model smoke tests: {failures}"\n'

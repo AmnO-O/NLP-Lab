@@ -22,7 +22,7 @@ def context(model, calls):
 
 def test_five_notebooks_and_suite_embed_current_sources():
     from generate_notebooks import NAMES
-    assert set(NAMES)=={'paddle','rapid','easyocr','tesseract','granite'}
+    assert set(NAMES)=={'paddle','rapid','easyocr','tesseract','internvl'}
     for name in [*NAMES.values(),'notebooks/OPRB_Kaggle_2GPU.ipynb','notebooks/OPRB_Kaggle_All5_Smoke.ipynb','OPRB_06_Comparative_Analysis_and_Report.ipynb']:
         nb=notebook(name)
         for cell in nb['cells']:
@@ -50,7 +50,7 @@ def test_model_isolation_keeps_driver_paths(tmp_path):
     assert '--system-site-packages' not in calls[1][0][0]
 
 
-@pytest.mark.parametrize('model',['paddle','rapid','easyocr','granite'])
+@pytest.mark.parametrize('model',['paddle','rapid','easyocr','internvl'])
 def test_install_selects_matching_engine_and_complete_dependencies(model):
     calls=[]
     exec(''.join(notebook()['cells'][2]['source']),context(model,calls))
@@ -68,7 +68,7 @@ def test_install_selects_matching_engine_and_complete_dependencies(model):
 
 def test_no_gpu_is_detected_before_querying_device_name(monkeypatch):
     calls=[]
-    exec(''.join(notebook()['cells'][3]['source']),context('granite',calls))
+    exec(''.join(notebook()['cells'][3]['source']),context('internvl',calls))
     fake=SimpleNamespace(__version__='test',cuda=SimpleNamespace(device_count=lambda:0,is_available=lambda:False))
     monkeypatch.setitem(sys.modules,'torch',fake)
     with pytest.raises(AssertionError,match='CUDA unavailable'):

@@ -35,7 +35,7 @@ def prepare_model_python():
 ''')
 
 INSTALL = dedent('''
-assert MODEL in ("paddle", "rapid", "easyocr", "tesseract", "granite")
+assert MODEL in ("paddle", "rapid", "easyocr", "tesseract", "internvl")
 gpu_ids = GPUS.split(",")
 assert all(g.isdigit() for g in gpu_ids) and len(set(gpu_ids)) == len(gpu_ids), "GPUS must be unique numeric IDs"
 print("Selected model:", MODEL, "GPU IDs:", GPUS, "host Python:", sys.version)
@@ -44,7 +44,7 @@ if MODEL != "tesseract":
 PYTHON = prepare_model_python()
 if MODEL == "paddle":
     run("-m", "pip", "install", "torch==2.9.1", "--index-url", "https://download.pytorch.org/whl/cpu")
-elif MODEL in ("easyocr", "granite"):
+elif MODEL in ("easyocr", "internvl"):
     run("-m", "pip", "install", "torch==2.9.1", "torchvision==0.24.1", "--index-url", "https://download.pytorch.org/whl/cu126")
 run("-m", "pip", "install", "--upgrade-strategy", "only-if-needed", "-e", ".[test]")
 if MODEL == "rapid":
@@ -89,7 +89,7 @@ if MODEL == "paddle":
         "assert ids and min(ids)>=0 and max(ids)<n, 'Selected GPU IDs unavailable'; "
         "[print(i,paddle.device.cuda.get_device_name(i)) for i in ids]; "
         "paddle.set_device('gpu:'+str(ids[0])); paddle.zeros([1]); paddle.device.cuda.synchronize()")
-elif MODEL in ("easyocr", "granite"):
+elif MODEL in ("easyocr", "internvl"):
     run("-c", "import torch; "
         f"ids = {list(map(int, GPUS.split(',')))!r}; "
         "n=torch.cuda.device_count(); print('Torch:',torch.__version__,'GPUs:',n); "
@@ -102,7 +102,7 @@ else:
 run("-m", "oprb_lab", "download", "--data", DATA)
 # Preload weights once to avoid two GPU workers racing to download the same files.
 preflight = ("from huggingface_hub import model_info; from oprb_lab.models import Adapter, MODELS; "
-             f"name={MODEL!r}; rev=model_info(MODELS[name]).sha if name=='granite' else 'assets'; "
+             f"name={MODEL!r}; rev=model_info(MODELS[name]).sha if name=='internvl' else 'assets'; "
              f"a=Adapter(name,rev,rec_batch_size={REC_BATCH_SIZE},tessdata={str(TESSDATA)!r}); print(a.metadata)")
 run("-c", preflight)
 ''')
@@ -110,7 +110,7 @@ run("-c", preflight)
 RUN = dedent('''
 args = ["-m", "oprb_lab", "run", "--model", MODEL, "--data", DATA, "--output", OUTPUT,
         "--gpus", GPUS, "--rec-batch-size", str(REC_BATCH_SIZE), "--cpu-workers", str(CPU_WORKERS),
-        "--page-batch-size", str(PAGE_BATCH_SIZE if MODEL == "granite" else 1)]
+        "--page-batch-size", str(PAGE_BATCH_SIZE if MODEL == "internvl" else 1)]
 if MODEL == "tesseract":
     args += ["--tessdata", str(TESSDATA)]
 if LIMIT is not None:

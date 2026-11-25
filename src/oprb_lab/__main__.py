@@ -32,24 +32,24 @@ def launch(args):
     if args.model != "tesseract" and (any(not g.isdigit() for g in gpus) or len(set(gpus)) != len(gpus)):
         raise ValueError("gpus must be unique numeric IDs, e.g. 0,1")
     page_batch_size = getattr(args, "page_batch_size", 1)
-    if args.model != "granite" and page_batch_size != 1:
-        raise ValueError("Page batching is supported only for Granite; use recognition batching for OCR")
-    revision = model_info(MODELS[args.model], revision=args.revision).sha if args.model == "granite" else "package-pretrained-assets"
+    if args.model != "internvl" and page_batch_size != 1:
+        raise ValueError("Page batching is supported only for InternVL")
+    revision = model_info(MODELS[args.model], revision=args.revision).sha if args.model == "internvl" else "package-pretrained-assets"
     tessdata = getattr(args, "tessdata", None)
     packages = {}
-    for name in ("torch", "torchvision", "transformers", "paddleocr", "paddlepaddle-gpu", "docling-core", "Pillow", "rapidfuzz", "easyocr", "rapidocr-onnxruntime", "onnxruntime-gpu"):
+    for name in ("torch", "torchvision", "transformers", "paddleocr", "paddlepaddle-gpu", "einops", "timm", "Pillow", "rapidfuzz", "easyocr", "rapidocr-onnxruntime", "onnxruntime-gpu"):
         try:
             packages[name] = version(name)
         except PackageNotFoundError:
             pass
     config = dict(schema=3, model=args.model, model_id=MODELS[args.model], revision=revision, packages=packages,
-                  precision="float16" if args.model == "granite" else "pretrained engine default",
+                  precision="float16" if args.model == "internvl" else "pretrained engine default",
                   max_tokens=args.max_tokens, rec_batch_size=getattr(args, "rec_batch_size", 16),
                   page_batch_size=page_batch_size, tessdata=str(Path(tessdata).resolve()) if tessdata else None,
                   tessdata_sha=file_sha(Path(tessdata) / "eng.traineddata") if args.model == "tesseract" and tessdata else None,
                   execution="CPU processes" if args.model == "tesseract" else "one process per GPU",
                   timing_mode="single page latency" if page_batch_size == 1 else "batch wall time / actual batch pages (throughput)",
-                  prompt=PROMPT if args.model == "granite" else None,
+                  prompt=PROMPT if args.model == "internvl" else None,
                   limit=args.limit, seed=args.seed, world_size=len(gpus),
                   manifest_sha=fingerprint([{k: v for k, v in s.items() if k not in ("image_path", "gt_path")} for s in samples]),
                   normalization="NFKC whitespace casefold", gt_order="annotation order",

@@ -9,7 +9,7 @@ from oprb_lab.models import Adapter, MODELS, ort_session
 
 
 def test_registry_is_exact_new_five():
-    assert set(MODELS) == {'paddle', 'rapid', 'easyocr', 'tesseract', 'granite'}
+    assert set(MODELS) == {'paddle', 'rapid', 'easyocr', 'tesseract', 'internvl'}
     with pytest.raises(ValueError):
         Adapter('qwen')
 

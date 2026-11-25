@@ -8,12 +8,13 @@ NAMES = {
  'rapid': 'OPRB_02_PP_OCRv4_RapidOCR_Evaluation.ipynb',
  'easyocr': 'OPRB_03_EasyOCR_Evaluation.ipynb',
  'tesseract': 'OPRB_04_Tesseract_Fast_Evaluation.ipynb',
- 'granite': 'OPRB_05_Granite_Docling_258M_Evaluation.ipynb',
+ 'internvl': 'OPRB_05_InternVL2_5_1B_Evaluation.ipynb',
 }
 LEGACY = ['OPRB_01_EasyOCR_Evaluation.ipynb', 'OPRB_03_PaddleOCR_Mobile_Evaluation.ipynb',
  'OPRB_04_PaddleOCR_VL_Evaluation.ipynb', 'OPRB_Qwen2_5_VL_3B_Test_Evaluation.ipynb',
  'OPRB_05_Comparative_Analysis_and_Report.ipynb', 'OPRB_02_Granite_Docling_258M_Evaluation.ipynb',
- 'OPRB_03_GOT_OCR2_Evaluation.ipynb', 'OPRB_04_InternVL2_5_1B_Evaluation.ipynb', 'OPRB_05_Qwen3_VL_2B_Evaluation.ipynb']
+ 'OPRB_03_GOT_OCR2_Evaluation.ipynb', 'OPRB_04_InternVL2_5_1B_Evaluation.ipynb', 'OPRB_05_Qwen3_VL_2B_Evaluation.ipynb',
+ 'OPRB_05_Granite_Docling_258M_Evaluation.ipynb']
 
 
 def generate(root):
