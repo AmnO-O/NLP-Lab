@@ -7,7 +7,6 @@ from PIL import Image
 
 from oprb_lab.data import collect, extract_flat, read_gt, shard
 from oprb_lab.metrics import normalize, score
-from oprb_lab.models import intern_tiles
 from oprb_lab.storage import fingerprint, read_rows, rewrite_rows
 
 
@@ -25,6 +24,12 @@ def test_metrics_duplicates_and_insertions():
 
 def test_normalization():
     assert normalize("  Ａ\nB\t c ") == "a b c"
+
+
+def test_gt_accepts_ten_column_annotations(tmp_path):
+    path = tmp_path / "page.txt"
+    path.write_text("word\t" + "\t".join(["0"] * 9), encoding="utf-8")
+    assert read_gt(path) == "word"
 
 
 def test_shards_are_disjoint_complete():
@@ -96,13 +101,6 @@ def test_resume_recovers_partial_last_line(tmp_path):
     assert json.loads(path.read_text())["uid"] == "a"
     assert fingerprint({"a": 1, "b": 2}) == fingerprint({"b": 2, "a": 1})
     assert fingerprint({"a": 1}) != fingerprint({"a": 2})
-
-
-def test_tiles_respect_budget_and_keep_thumbnail():
-    image = Image.new("RGB", (1200, 1800))
-    tiles = intern_tiles(image, max_tiles=6)
-    assert 1 <= len(tiles) <= 7
-    assert all(t.size == (448, 448) for t in tiles)
 
 
 def test_report_marks_incomplete(tmp_path):

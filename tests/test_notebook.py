@@ -1,49 +1,75 @@
-"""Notebook packaging checks; runnable without third-party dependencies."""
+"""Validate generated notebooks and environment routing without downloading models."""
 import ast
 import json
+import os
+import sys
 from pathlib import Path
-import unittest
+from types import SimpleNamespace
+
+import pytest
+
+ROOT=Path(__file__).resolve().parents[1]
 
 
-class NotebookTests(unittest.TestCase):
-    def test_five_primary_notebooks_use_shared_source(self):
-        import importlib.util
-        root = Path(__file__).resolve().parents[1]
-        spec = importlib.util.spec_from_file_location("generator", root / "generate_notebooks.py")
-        generator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(generator)
-        self.assertEqual(set(generator.NAMES), {"paddle", "granite", "got", "internvl", "qwen"})
-        for key, filename in generator.NAMES.items():
-            nb = json.loads((root / filename).read_text(encoding="utf-8"))
-            for cell in nb["cells"]:
-                if cell["cell_type"] == "code":
-                    ast.parse("".join(cell["source"]))
-            setup = "".join(nb["cells"][1]["source"])
-            tree = ast.parse(setup)
-            assignments = {node.targets[0].id: node.value for node in tree.body
-                           if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)}
-            self.assertEqual(ast.literal_eval(assignments["MODEL"]), key)
-            payload = ast.literal_eval(assignments["FILES"])
-            for path in (root / "src").rglob("*.py"):
-                self.assertEqual(payload[path.relative_to(root).as_posix()], path.read_text(encoding="utf-8"))
-        for filename in generator.LEGACY:
-            self.assertFalse((root / filename).exists())
-            self.assertTrue((root / "notebooks/legacy" / filename).exists())
-
-    def test_standalone_sources_and_valid_cells(self):
-        root = Path(__file__).resolve().parents[1]
-        notebook = json.loads((root / "notebooks/OPRB_Kaggle_2GPU.ipynb").read_text(encoding="utf-8"))
-        code = ["".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code"]
-        for source in code:
-            ast.parse(source)
-        tree = ast.parse(code[0])
-        payload = next(ast.literal_eval(n.value) for n in tree.body
-                       if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "FILES" for t in n.targets))
-        for folder, pattern in (("src", "*.py"), ("requirements", "*.txt"), ("tests", "test_*.py")):
-            for path in (root / folder).rglob(pattern):
-                self.assertEqual(payload[path.relative_to(root).as_posix()], path.read_text(encoding="utf-8"))
-        self.assertIn('GPUS = "0,1"', "".join(code))
+def notebook(name='notebooks/OPRB_Kaggle_2GPU.ipynb'):
+    return json.loads((ROOT/name).read_text(encoding='utf-8'))
 
 
-if __name__ == "__main__":
-    unittest.main()
+def context(model, calls):
+    return dict(MODEL=model,GPUS='0,1',DATA='unused',TESSDATA=Path('assets'),REC_BATCH_SIZE=16,
+                sys=sys,prepare_model_python=lambda:'/isolated/python',run=lambda *args:calls.append(args))
+
+
+def test_five_notebooks_and_suite_embed_current_sources():
+    from generate_notebooks import NAMES
+    assert set(NAMES)=={'paddle','rapid','easyocr','tesseract','granite'}
+    for name in [*NAMES.values(),'notebooks/OPRB_Kaggle_2GPU.ipynb','notebooks/OPRB_Kaggle_All5_Smoke.ipynb','OPRB_06_Comparative_Analysis_and_Report.ipynb']:
+        nb=notebook(name)
+        for cell in nb['cells']:
+            if cell['cell_type']=='code': ast.parse(''.join(cell['source']))
+        tree=ast.parse(''.join(nb['cells'][1]['source']))
+        files=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='FILES' for t in n.targets))
+        for folder in ('src','tests','requirements'):
+            for path in (ROOT/folder).rglob('*.py' if folder!='requirements' else '*.txt'):
+                assert files[path.relative_to(ROOT).as_posix()]==path.read_text(encoding='utf-8-sig')
+
+
+def test_model_isolation_keeps_driver_paths(tmp_path):
+    tree=ast.parse(''.join(notebook()['cells'][1]['source']))
+    functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)]
+    calls=[]
+    env={'LD_LIBRARY_PATH':'/driver','PYTHONPATH':'/host'}
+    ns=dict(BASE=tmp_path,ROOT=tmp_path,MODEL='rapid',os=os,sys=sys,ENV=env,
+            subprocess=SimpleNamespace(run=lambda *args,**kw:calls.append((args,kw))))
+    exec(compile(ast.Module(body=functions,type_ignores=[]),'setup','exec'),ns)
+    ns['PYTHON']=ns['prepare_model_python']()
+    ns['run']('-c','pass')
+    assert 'rapid' in calls[-1][0][0][0]
+    assert env['LD_LIBRARY_PATH']=='/driver'
+    assert 'PYTHONPATH' not in env
+    assert '--system-site-packages' not in calls[1][0][0]
+
+
+@pytest.mark.parametrize('model',['paddle','rapid','easyocr','granite'])
+def test_install_selects_matching_engine_and_complete_dependencies(model):
+    calls=[]
+    exec(''.join(notebook()['cells'][2]['source']),context(model,calls))
+    installs=[c for c in calls if c[:3]==('-m','pip','install')]
+    editable=next(c for c in installs if '-e' in c)
+    assert '.[test]' in editable and '--no-deps' not in editable
+    assert any(f'requirements/{model}.txt' in c for c in installs)
+    if model=='paddle':
+        assert any('https://download.pytorch.org/whl/cpu' in c for c in installs)
+        assert any('from paddleocr import PaddleOCR' in str(c) for c in calls)
+    if model=='rapid':
+        assert ('-m','pip','uninstall','-y','onnxruntime') in calls
+        assert any('onnxruntime-gpu[cuda,cudnn]==1.23.2' in c for c in installs)
+
+
+def test_no_gpu_is_detected_before_querying_device_name(monkeypatch):
+    calls=[]
+    exec(''.join(notebook()['cells'][3]['source']),context('granite',calls))
+    fake=SimpleNamespace(__version__='test',cuda=SimpleNamespace(device_count=lambda:0,is_available=lambda:False))
+    monkeypatch.setitem(sys.modules,'torch',fake)
+    with pytest.raises(AssertionError,match='CUDA unavailable'):
+        exec(calls[0][1])

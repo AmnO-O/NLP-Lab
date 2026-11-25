@@ -77,7 +77,7 @@ def read_gt(path):
     tokens = []
     for line in Path(path).read_text(encoding="utf-8-sig").splitlines():
         fields = line.split("\t")
-        if len(fields) >= 11 and fields[0].strip():
+        if len(fields) >= 10 and fields[0].strip():
             tokens.append(fields[0].strip())
     if not tokens:
         raise ValueError(f"No GT tokens: {path}")

@@ -57,9 +57,13 @@ def compare(run_dirs, output):
         raise ValueError("Ground truth differs across runs")
     table = paired.groupby("model")[METRICS].mean()
     table["n_common"] = len(common)
+    modes = {config.get("timing_mode", "single page latency") for config in configs}
     table["pareto"] = [not any((other.latency_sec <= row.latency_sec and other.wer <= row.wer)
                        and (other.latency_sec < row.latency_sec or other.wer < row.wer)
-                       for _, other in table.iterrows()) for _, row in table.iterrows()]
+                       for _, other in table.iterrows()) for _, row in table.iterrows()] if len(modes) == 1 else None
+    settings = {config["model"]: config for config in configs}
+    for field in ("execution", "world_size", "rec_batch_size", "page_batch_size", "timing_mode"):
+        table[field] = [settings[key].get(field) for key in table.index]
     table.to_csv(output / "comparison.csv")
     (output / "comparison.tex").write_text(table.to_latex(float_format="%.4f"), encoding="utf-8")
     paired.to_csv(output / "paired_pages.csv", index=False)
@@ -78,7 +82,7 @@ def compare(run_dirs, output):
     plt.close(fig)
     (output / "protocol.json").write_text(json.dumps(dict(
         runs={k: str(v) for k, v in runs.items()}, configs=configs,
-        common_uids=sorted(common), note="Report coverage alongside paired scores. Compare latency only on equivalent hardware and GPU concurrency."), indent=2))
+        common_uids=sorted(common), note="Report coverage alongside paired scores. Tesseract is CPU-only. Timings are deployment-specific; Pareto omitted for mixed latency/throughput modes."), indent=2))
     return table
 
 

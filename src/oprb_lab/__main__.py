@@ -9,27 +9,47 @@ from pathlib import Path
 
 from .data import collect, download
 from .models import MODELS, PROMPT
+from .data import file_sha
 from .report import summarize
 from .storage import fingerprint
+
+
+def show_worker_logs(root, workers, tail=80):
+    """Expose startup/load failures hidden in redirected worker output."""
+    for rank, worker in enumerate(workers):
+        path = Path(root) / f"rank{rank}.log"
+        print(f"Worker {rank}: exit code {worker.returncode}; log: {path}", flush=True)
+        if path.exists():
+            from collections import deque
+            with path.open(encoding="utf-8", errors="replace") as stream:
+                print("".join(deque(stream, maxlen=tail)), flush=True)
 
 
 def launch(args):
     from huggingface_hub import model_info
     samples = collect(args.data, args.limit, args.seed)
-    gpus = args.gpus.split(",")
-    if any(not g.isdigit() for g in gpus) or len(set(gpus)) != len(gpus):
+    gpus = args.gpus.split(",") if args.model != "tesseract" else [""] * getattr(args, "cpu_workers", 2)
+    if args.model != "tesseract" and (any(not g.isdigit() for g in gpus) or len(set(gpus)) != len(gpus)):
         raise ValueError("gpus must be unique numeric IDs, e.g. 0,1")
-    revision = model_info(MODELS[args.model], revision=args.revision).sha if args.model != "paddle" else "paddleocr-package-assets"
+    page_batch_size = getattr(args, "page_batch_size", 1)
+    if args.model != "granite" and page_batch_size != 1:
+        raise ValueError("Page batching is supported only for Granite; use recognition batching for OCR")
+    revision = model_info(MODELS[args.model], revision=args.revision).sha if args.model == "granite" else "package-pretrained-assets"
+    tessdata = getattr(args, "tessdata", None)
     packages = {}
-    for name in ("torch", "torchvision", "transformers", "paddleocr", "paddlepaddle-gpu", "docling-core", "Pillow", "rapidfuzz"):
+    for name in ("torch", "torchvision", "transformers", "paddleocr", "paddlepaddle-gpu", "docling-core", "Pillow", "rapidfuzz", "easyocr", "rapidocr-onnxruntime", "onnxruntime-gpu"):
         try:
             packages[name] = version(name)
         except PackageNotFoundError:
             pass
-    config = dict(schema=2, model=args.model, model_id=MODELS[args.model], revision=revision, packages=packages,
-                  precision="float16" if args.model != "paddle" else "PaddleOCR default float32",
-                  max_tokens=args.max_tokens, max_pixels=args.max_pixels, max_tiles=args.max_tiles,
-                  prompt="Convert this page to docling." if args.model == "granite" else "GOT processor unformatted OCR" if args.model == "got" else PROMPT,
+    config = dict(schema=3, model=args.model, model_id=MODELS[args.model], revision=revision, packages=packages,
+                  precision="float16" if args.model == "granite" else "pretrained engine default",
+                  max_tokens=args.max_tokens, rec_batch_size=getattr(args, "rec_batch_size", 16),
+                  page_batch_size=page_batch_size, tessdata=str(Path(tessdata).resolve()) if tessdata else None,
+                  tessdata_sha=file_sha(Path(tessdata) / "eng.traineddata") if args.model == "tesseract" and tessdata else None,
+                  execution="CPU processes" if args.model == "tesseract" else "one process per GPU",
+                  timing_mode="single page latency" if page_batch_size == 1 else "batch wall time / actual batch pages (throughput)",
+                  prompt=PROMPT if args.model == "granite" else None,
                   limit=args.limit, seed=args.seed, world_size=len(gpus),
                   manifest_sha=fingerprint([{k: v for k, v in s.items() if k not in ("image_path", "gt_path")} for s in samples]),
                   normalization="NFKC whitespace casefold", gt_order="annotation order",
@@ -42,9 +62,8 @@ def launch(args):
     start = time.perf_counter()
     try:
         for rank, gpu in enumerate(gpus):
-            env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="2",
+            env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="1",
                        PYTHONHASHSEED=str(args.seed), CUBLAS_WORKSPACE_CONFIG=":4096:8")
-            env.pop("LD_LIBRARY_PATH", None)
             log = (root / f"rank{rank}.log").open("a", encoding="utf-8")
             logs.append(log)
             workers.append(subprocess.Popen([sys.executable, "-u", "-m", "oprb_lab.worker", str(root), str(rank), str(len(gpus))],
@@ -67,6 +86,7 @@ def launch(args):
                                                         exit_codes=[w.returncode for w in workers]), indent=2))
     summary = summarize(root)
     if any(w.returncode for w in workers) or not summary["complete"]:
+        show_worker_logs(root, workers)
         raise SystemExit("Incomplete evaluation: inspect logs; rerun the same command to retry errors/missing pages.")
 
 
@@ -89,14 +109,20 @@ def main():
     run.add_argument("--max-tokens", type=int, default=4096)
     run.add_argument("--max-pixels", type=int, default=1280*28*28)
     run.add_argument("--max-tiles", type=int, default=12)
+    run.add_argument("--rec-batch-size", type=int, default=16, help="OCR line-crop recognition batch size")
+    run.add_argument("--page-batch-size", type=int, default=1, help="Granite pages per batch; >1 measures amortized throughput")
+    run.add_argument("--cpu-workers", type=int, default=2, help="Tesseract CPU process count")
+    run.add_argument("--tessdata", help="Directory containing tessdata_fast/eng.traineddata")
     args = parser.parse_args()
     if args.command == "download":
         download(args.data, args.revision)
     elif args.command == "summarize":
         summarize(args.run_dir)
     else:
-        if min(args.max_tokens, args.max_pixels, args.max_tiles) < 1:
+        if min(args.max_tokens, args.max_pixels, args.max_tiles, args.rec_batch_size, args.page_batch_size, args.cpu_workers) < 1:
             parser.error("Token, pixel, and tile limits must be positive")
+        if args.model == "tesseract" and not args.tessdata:
+            parser.error("Tesseract requires --tessdata pointing to tessdata_fast/eng.traineddata")
         launch(args)
 
 
