@@ -7,7 +7,7 @@ name = "oprb-lab"
 version = "0.1.0"
 description = "Pretrained OCR and VLM evaluation on occluded OPRB pages"
 requires-python = ">=3.10"
-dependencies = ["Pillow>=10", "huggingface-hub>=0.30", "rapidfuzz>=3", "pandas>=2", "matplotlib>=3.8", "tqdm>=4.66"]
+dependencies = ["Pillow>=10", "huggingface-hub>=0.30", "rapidfuzz>=3", "pandas>=2", "jinja2>=3", "matplotlib>=3.8", "tqdm>=4.66"]
 
 [project.optional-dependencies]
 vlm = ["transformers==4.57.1", "accelerate>=1,<2", "docling-core>=2.48,<3"]
