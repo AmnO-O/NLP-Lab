@@ -47,7 +47,10 @@ if MODEL == "paddle":
 elif MODEL in ("easyocr", "granite"):
     run("-m", "pip", "install", "torch==2.9.1", "torchvision==0.24.1", "--index-url", "https://download.pytorch.org/whl/cu126")
 run("-m", "pip", "install", "--upgrade-strategy", "only-if-needed", "-e", ".[test]")
-run("-m", "pip", "install", "-r", f"requirements/{MODEL}.txt")
+if MODEL == "rapid":
+    run("-m", "pip", "install", "--ignore-requires-python", "-r", f"requirements/{MODEL}.txt")
+else:
+    run("-m", "pip", "install", "-r", f"requirements/{MODEL}.txt")
 if MODEL == "paddle":
     run("-m", "pip", "install", "paddlepaddle-gpu==3.2.0", "-i", "https://www.paddlepaddle.org.cn/packages/stable/cu126/")
     run("-c", "import torch; assert torch.version.cuda is None; from paddleocr import PaddleOCR; print('PaddleOCR import passed')")
